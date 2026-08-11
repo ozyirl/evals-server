@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from './upload.service';
+import { ImageQualityAssessment } from '../image-quality/image-quality.service';
 
 @Controller('upload')
 export class UploadController {
@@ -13,9 +14,11 @@ export class UploadController {
 
   @Post('image')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadImage(
-    @UploadedFile() file: Express.Multer.File,
-  ): Promise<{ uuid: string; cdnUrl: string }> {
+  async uploadImage(@UploadedFile() file: Express.Multer.File): Promise<{
+    uuid: string;
+    cdnUrl: string;
+    assessment: ImageQualityAssessment;
+  }> {
     return this.uploadService.storeImage(file);
   }
 }
