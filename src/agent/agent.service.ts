@@ -2,12 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { HumanMessage } from '@langchain/core/messages';
 import { ChatOpenAI } from '@langchain/openai';
 import { buildAgentGraph } from './agent.graph';
+import { ImageAgentService } from './image-agent.service';
+import { searchTool } from './tools/search.tool';
+import { createImageQualityTool } from './tools/image-quality.tool';
 
 @Injectable()
 export class AgentService {
   private readonly graph: ReturnType<typeof buildAgentGraph>;
 
-  constructor() {
+  constructor(private readonly imageAgentService: ImageAgentService) {
     const model = new ChatOpenAI({
       apiKey: process.env.KIMI_API_KEY,
       model: process.env.KIMI_MODEL ?? 'kimi-k2.6',
@@ -17,7 +20,10 @@ export class AgentService {
       },
     });
 
-    this.graph = buildAgentGraph(model);
+    this.graph = buildAgentGraph(model, [
+      searchTool,
+      createImageQualityTool(this.imageAgentService),
+    ]);
   }
 
   async ask(message: string, threadId = 'default'): Promise<string> {
