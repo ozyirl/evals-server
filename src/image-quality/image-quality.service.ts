@@ -21,15 +21,20 @@ const assessmentSchema = z.object({
 
 export type ImageQualityAssessment = z.infer<typeof assessmentSchema>;
 
+// gemini-2.5-flash-lite is no longer available to new API keys/projects.
+// Using the literal current flash-lite model name (not the "-latest" alias):
+// @langchain/google-genai gates image support on the model name starting
+// with "gemini-3"/"gemini-2"/etc., which the alias's name doesn't match.
+const MODEL_NAME = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite';
+
 @Injectable()
 export class ImageQualityService {
+  /** Recorded alongside each assessment so results stay traceable to a model. */
+  readonly modelName = MODEL_NAME;
+
   private readonly model = new ChatGoogleGenerativeAI({
     apiKey: process.env.GEMINI_API_KEY,
-    // gemini-2.5-flash-lite is no longer available to new API keys/projects.
-    // Using the literal current flash-lite model name (not the "-latest" alias):
-    // @langchain/google-genai gates image support on the model name starting
-    // with "gemini-3"/"gemini-2"/etc., which the alias's name doesn't match.
-    model: process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite',
+    model: MODEL_NAME,
   }).withStructuredOutput(assessmentSchema);
 
   async assessImage(

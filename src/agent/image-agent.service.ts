@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { AssessmentLogService } from '../assessments/assessment-log.service';
 import {
   ImageQualityAssessment,
   ImageQualityService,
@@ -11,21 +12,90 @@ import {
 export type ImageSource =
   { imageUrl: string } | { buffer: Buffer; mimeType: string };
 
+export type AssessmentContext = {
+  userId: string;
+  fileName?: string;
+};
+
 export type ImageAssessmentResult = ImageQualityLabel & {
   assessment: ImageQualityAssessment;
 };
 
 @Injectable()
 export class ImageAgentService {
+  private readonly logger = new Logger(ImageAgentService.name);
   private readonly graph: ReturnType<typeof buildImageQualityGraph>;
 
-  constructor(private readonly imageQualityService: ImageQualityService) {
+  constructor(
+    private readonly imageQualityService: ImageQualityService,
+    private readonly assessmentLog: AssessmentLogService,
+  ) {
     this.graph = buildImageQualityGraph(this.imageQualityService);
   }
 
-  async assessImage(source: ImageSource): Promise<ImageAssessmentResult> {
-    const state = await this.graph.invoke(source);
+  async assessImage(
+    source: ImageSource,
+    context: AssessmentContext,
+  ): Promise<ImageAssessmentResult> {
+    const isUrl = 'imageUrl' in source;
+    const startedAt = Date.now();
 
-    return { ...state.result, assessment: state.assessment };
+    this.logger.log(
+      `Assessing ${isUrl ? source.imageUrl : (context.fileName ?? 'upload')} for ${context.userId}`,
+    );
+
+    try {
+      const state = await this.graph.invoke(source);
+      const latencyMs = Date.now() - startedAt;
+
+      this.logger.log(
+        `${state.result.label} (${state.assessment.confidence} confidence${
+          state.result.needsReview ? ', needs review' : ''
+        }) in ${latencyMs}ms`,
+      );
+
+      await this.assessmentLog.record({
+        userId: context.userId,
+        source: isUrl ? 'url' : 'upload',
+        imageUrl: isUrl ? source.imageUrl : null,
+        fileName: context.fileName ?? null,
+        mimeType: state.mimeType,
+        byteSize: state.buffer?.byteLength ?? null,
+        status: 'completed',
+        label: state.result.label,
+        requiresEnhancement: state.result.requiresEnhancement,
+        needsReview: state.result.needsReview,
+        confidence: state.assessment.confidence,
+        scores: state.assessment.scores,
+        issues: state.assessment.issues,
+        reason: state.assessment.reason,
+        model: this.imageQualityService.modelName,
+        latencyMs,
+      });
+
+      return { ...state.result, assessment: state.assessment };
+    } catch (error) {
+      const latencyMs = Date.now() - startedAt;
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.warn(`Assessment failed after ${latencyMs}ms: ${message}`);
+
+      // Failures are part of the eval record — a rejected URL or a model
+      // error is a signal, not something to drop on the floor.
+      await this.assessmentLog.record({
+        userId: context.userId,
+        source: isUrl ? 'url' : 'upload',
+        imageUrl: isUrl ? source.imageUrl : null,
+        fileName: context.fileName ?? null,
+        mimeType: isUrl ? null : source.mimeType,
+        byteSize: isUrl ? null : source.buffer.byteLength,
+        status: 'failed',
+        model: this.imageQualityService.modelName,
+        latencyMs,
+        errorMessage: message,
+      });
+
+      throw error;
+    }
   }
 }

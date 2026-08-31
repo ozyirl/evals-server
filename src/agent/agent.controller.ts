@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   FileTypeValidator,
+  Get,
   MaxFileSizeValidator,
   ParseFilePipe,
   Post,
@@ -10,6 +11,9 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Auth } from '../auth/auth.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { AssessmentLogService } from '../assessments/assessment-log.service';
+import { ImageAssessmentRow } from '../db/schema';
 import { AgentService } from './agent.service';
 import {
   ImageAgentService,
@@ -35,11 +39,15 @@ export class AgentController {
   constructor(
     private readonly agentService: AgentService,
     private readonly imageAgentService: ImageAgentService,
+    private readonly assessmentLog: AssessmentLogService,
   ) {}
 
   @Post('ask')
-  async ask(@Body() dto: AskAgentDto): Promise<{ answer: string }> {
-    const answer = await this.agentService.ask(dto.message);
+  async ask(
+    @Body() dto: AskAgentDto,
+    @CurrentUser('sub') userId: string,
+  ): Promise<{ answer: string }> {
+    const answer = await this.agentService.ask(dto.message, userId);
     return { answer };
   }
 
@@ -47,8 +55,12 @@ export class AgentController {
   @Post('assess-image')
   async assessImage(
     @Body() dto: AssessImageDto,
+    @CurrentUser('sub') userId: string,
   ): Promise<ImageAssessmentResult> {
-    return this.imageAgentService.assessImage({ imageUrl: dto.imageUrl });
+    return this.imageAgentService.assessImage(
+      { imageUrl: dto.imageUrl },
+      { userId },
+    );
   }
 
   /** Assess an image uploaded straight from the client. */
@@ -58,10 +70,19 @@ export class AgentController {
   )
   async assessImageFile(
     @UploadedFile(imageFilePipe) file: Express.Multer.File,
+    @CurrentUser('sub') userId: string,
   ): Promise<ImageAssessmentResult> {
-    return this.imageAgentService.assessImage({
-      buffer: file.buffer,
-      mimeType: file.mimetype,
-    });
+    return this.imageAgentService.assessImage(
+      { buffer: file.buffer, mimeType: file.mimetype },
+      { userId, fileName: file.originalname },
+    );
+  }
+
+  /** Recent assessments for the signed-in user, newest first. */
+  @Get('assessments')
+  async assessments(
+    @CurrentUser('sub') userId: string,
+  ): Promise<ImageAssessmentRow[]> {
+    return this.assessmentLog.listForUser(userId);
   }
 }

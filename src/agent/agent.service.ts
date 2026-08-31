@@ -26,10 +26,11 @@ export class AgentService {
     ]);
   }
 
-  async ask(message: string, threadId = 'default'): Promise<string> {
+  async ask(message: string, userId: string): Promise<string> {
     const result = await this.graph.invoke(
       { messages: [new HumanMessage(message)] },
-      { configurable: { thread_id: threadId } },
+      // userId reaches the image tool so its assessments are attributed.
+      { configurable: { thread_id: userId, userId } },
     );
 
     const last = result.messages[result.messages.length - 1];

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Auth } from '../auth/auth.decorator';
+import { CurrentUser } from '../auth/current-user.decorator';
 import {
   MAX_IMAGE_BYTES,
   SUPPORTED_IMAGE_TYPES,
@@ -35,11 +36,12 @@ export class UploadController {
       }),
     )
     file: Express.Multer.File,
+    @CurrentUser('sub') userId: string,
   ): Promise<{
     uuid: string;
     cdnUrl: string;
     assessment: ImageQualityAssessment;
   }> {
-    return this.uploadService.storeImage(file);
+    return this.uploadService.storeImage(file, userId);
   }
 }
