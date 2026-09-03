@@ -21,5 +21,11 @@ module.exports = {
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
+    // Underscore-prefixed args mark deliberately unused params, e.g. the
+    // signatures of not-yet-implemented handlers.
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      { argsIgnorePattern: '^_' },
+    ],
   },
 };

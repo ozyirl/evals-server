@@ -5,6 +5,10 @@ import {
   ImageQualityService,
 } from '../image-quality/image-quality.service';
 import {
+  ImageRouterService,
+  RouteDestination,
+} from '../routing/image-router.service';
+import {
   buildImageQualityGraph,
   ImageQualityLabel,
 } from './image-quality.graph';
@@ -19,6 +23,8 @@ export type AssessmentContext = {
 
 export type ImageAssessmentResult = ImageQualityLabel & {
   assessment: ImageQualityAssessment;
+  /** The downstream handler this image was dispatched to. */
+  destination: RouteDestination;
 };
 
 @Injectable()
@@ -29,8 +35,12 @@ export class ImageAgentService {
   constructor(
     private readonly imageQualityService: ImageQualityService,
     private readonly assessmentLog: AssessmentLogService,
+    private readonly imageRouter: ImageRouterService,
   ) {
-    this.graph = buildImageQualityGraph(this.imageQualityService);
+    this.graph = buildImageQualityGraph(
+      this.imageQualityService,
+      this.imageRouter,
+    );
   }
 
   async assessImage(
@@ -73,7 +83,11 @@ export class ImageAgentService {
         latencyMs,
       });
 
-      return { ...state.result, assessment: state.assessment };
+      return {
+        ...state.result,
+        assessment: state.assessment,
+        destination: state.destination,
+      };
     } catch (error) {
       const latencyMs = Date.now() - startedAt;
       const message = error instanceof Error ? error.message : String(error);

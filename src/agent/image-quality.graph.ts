@@ -8,6 +8,10 @@ import {
   MAX_IMAGE_BYTES,
   SUPPORTED_IMAGE_TYPES,
 } from '../image-quality/image-quality.constants';
+import {
+  ImageRouterService,
+  RouteDestination,
+} from '../routing/image-router.service';
 
 /** Assessments below this confidence are flagged for a human instead of auto-labelled. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -27,6 +31,8 @@ export const ImageQualityAnnotation = Annotation.Root({
   mimeType: Annotation<string>,
   assessment: Annotation<ImageQualityAssessment>,
   result: Annotation<ImageQualityLabel>,
+  /** Which downstream handler the image was dispatched to. */
+  destination: Annotation<RouteDestination>,
 });
 
 type ImageQualityState = typeof ImageQualityAnnotation.State;
@@ -104,6 +110,7 @@ function toLabel(
 
 export function buildImageQualityGraph(
   imageQualityService: ImageQualityService,
+  imageRouter: ImageRouterService,
 ) {
   async function assess(
     state: ImageQualityState,
@@ -123,19 +130,39 @@ export function buildImageQualityGraph(
     return { result: toLabel(state.assessment, true) };
   }
 
+  /** Both labelling paths converge here and hand off to the router. */
+  async function dispatch(
+    state: ImageQualityState,
+  ): Promise<Partial<ImageQualityState>> {
+    const destination = await imageRouter.route(
+      {
+        buffer: state.buffer,
+        mimeType: state.mimeType,
+        imageUrl: state.imageUrl,
+        assessment: state.assessment,
+        needsReview: state.result.needsReview,
+      },
+      state.result.label,
+    );
+
+    return { destination };
+  }
+
   const workflow = new StateGraph(ImageQualityAnnotation)
     .addNode('resolveImage', resolveImage)
     .addNode('assess', assess)
     .addNode('label', label)
     .addNode('flagForReview', flagForReview)
+    .addNode('dispatch', dispatch)
     .addEdge(START, 'resolveImage')
     .addEdge('resolveImage', 'assess')
     .addConditionalEdges('assess', routeByConfidence, [
       'label',
       'flagForReview',
     ])
-    .addEdge('label', END)
-    .addEdge('flagForReview', END);
+    .addEdge('label', 'dispatch')
+    .addEdge('flagForReview', 'dispatch')
+    .addEdge('dispatch', END);
 
   return workflow.compile();
 }

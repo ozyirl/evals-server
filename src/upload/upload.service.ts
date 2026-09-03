@@ -6,6 +6,10 @@ import {
   ImageQualityAssessment,
   ImageQualityService,
 } from '../image-quality/image-quality.service';
+import {
+  ImageRouterService,
+  RouteDestination,
+} from '../routing/image-router.service';
 
 @Injectable()
 export class UploadService {
@@ -19,6 +23,7 @@ export class UploadService {
   constructor(
     private readonly imageQualityService: ImageQualityService,
     private readonly assessmentLog: AssessmentLogService,
+    private readonly imageRouter: ImageRouterService,
   ) {}
 
   async storeImage(
@@ -28,6 +33,7 @@ export class UploadService {
     uuid: string;
     cdnUrl: string;
     assessment: ImageQualityAssessment;
+    destination: RouteDestination;
   }> {
     const startedAt = Date.now();
     this.logger.log(`Uploading ${file.originalname} for ${userId}`);
@@ -44,6 +50,17 @@ export class UploadService {
       ]);
 
       await storeFile({ uuid: uploaded.uuid }, { authSchema: this.authSchema });
+
+      const destination = await this.imageRouter.route(
+        {
+          buffer: file.buffer,
+          mimeType: file.mimetype,
+          imageUrl: uploaded.cdnUrl,
+          assessment,
+          needsReview: false,
+        },
+        assessment.decision,
+      );
 
       const latencyMs = Date.now() - startedAt;
       this.logger.log(
@@ -69,7 +86,12 @@ export class UploadService {
         latencyMs,
       });
 
-      return { uuid: uploaded.uuid, cdnUrl: uploaded.cdnUrl, assessment };
+      return {
+        uuid: uploaded.uuid,
+        cdnUrl: uploaded.cdnUrl,
+        assessment,
+        destination,
+      };
     } catch (error) {
       const latencyMs = Date.now() - startedAt;
       const message = error instanceof Error ? error.message : String(error);

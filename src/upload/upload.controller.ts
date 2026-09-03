@@ -16,6 +16,7 @@ import {
 } from '../image-quality/image-quality.constants';
 import { UploadService } from './upload.service';
 import { ImageQualityAssessment } from '../image-quality/image-quality.service';
+import { RouteDestination } from '../routing/image-router.service';
 
 @Auth()
 @Controller('upload')
@@ -41,6 +42,7 @@ export class UploadController {
     uuid: string;
     cdnUrl: string;
     assessment: ImageQualityAssessment;
+    destination: RouteDestination;
   }> {
     return this.uploadService.storeImage(file, userId);
   }

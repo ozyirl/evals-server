@@ -4,9 +4,10 @@ import { UploadService } from './upload.service';
 import { ImageQualityModule } from '../image-quality/image-quality.module';
 import { AuthModule } from '../auth/auth.module';
 import { AssessmentsModule } from '../assessments/assessments.module';
+import { RoutingModule } from '../routing/routing.module';
 
 @Module({
-  imports: [AssessmentsModule, AuthModule, ImageQualityModule],
+  imports: [AssessmentsModule, AuthModule, ImageQualityModule, RoutingModule],
   controllers: [UploadController],
   providers: [UploadService],
 })
