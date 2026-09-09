@@ -5,6 +5,8 @@ import {
   Get,
   MaxFileSizeValidator,
   ParseFilePipe,
+  Param,
+  ParseUUIDPipe,
   Post,
   UploadedFile,
   UseInterceptors,
@@ -25,6 +27,7 @@ import {
 } from '../image-quality/image-quality.constants';
 import { AskAgentDto } from './dto/ask-agent.dto';
 import { AssessImageDto } from './dto/assess-image.dto';
+import { PipelineLogService } from '../assessments/pipeline-log.service';
 
 const imageFilePipe = new ParseFilePipe({
   validators: [
@@ -40,6 +43,7 @@ export class AgentController {
     private readonly agentService: AgentService,
     private readonly imageAgentService: ImageAgentService,
     private readonly assessmentLog: AssessmentLogService,
+    private readonly pipelineLog: PipelineLogService,
   ) {}
 
   @Post('ask')
@@ -84,5 +88,13 @@ export class AgentController {
     @CurrentUser('sub') userId: string,
   ): Promise<ImageAssessmentRow[]> {
     return this.assessmentLog.listForUser(userId);
+  }
+
+  @Get('assessments/:runId/events')
+  async events(
+    @Param('runId', new ParseUUIDPipe()) runId: string,
+    @CurrentUser('sub') userId: string,
+  ) {
+    return this.pipelineLog.listForRun(userId, runId);
   }
 }

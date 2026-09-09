@@ -12,6 +12,9 @@ import {
   ImageRouterService,
   RouteDestination,
 } from '../routing/image-router.service';
+import { PipelineLogService } from '../assessments/pipeline-log.service';
+import { ImagePrompterService } from '../image-prompter/image-prompter.service';
+import { EnhancementPrompt } from '../image-prompter/image-prompter.schema';
 
 /** Assessments below this confidence are flagged for a human instead of auto-labelled. */
 export const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -25,6 +28,8 @@ export interface ImageQualityLabel {
 }
 
 export const ImageQualityAnnotation = Annotation.Root({
+  runId: Annotation<string>,
+  userId: Annotation<string>,
   /** Set when the image comes from an upstream service; resolved into a buffer. */
   imageUrl: Annotation<string>,
   buffer: Annotation<Buffer>,
@@ -33,6 +38,7 @@ export const ImageQualityAnnotation = Annotation.Root({
   result: Annotation<ImageQualityLabel>,
   /** Which downstream handler the image was dispatched to. */
   destination: Annotation<RouteDestination>,
+  enhancementPrompt: Annotation<EnhancementPrompt | null>,
 });
 
 type ImageQualityState = typeof ImageQualityAnnotation.State;
@@ -111,6 +117,8 @@ function toLabel(
 export function buildImageQualityGraph(
   imageQualityService: ImageQualityService,
   imageRouter: ImageRouterService,
+  imagePrompter: ImagePrompterService,
+  pipelineLog: PipelineLogService,
 ) {
   async function assess(
     state: ImageQualityState,
@@ -148,12 +156,74 @@ export function buildImageQualityGraph(
     return { destination };
   }
 
+  async function preparePrompt(
+    state: ImageQualityState,
+  ): Promise<Partial<ImageQualityState>> {
+    return {
+      enhancementPrompt: await imagePrompter.generate(
+        state.buffer,
+        state.mimeType,
+        state.assessment,
+      ),
+    };
+  }
+
+  function logged(
+    step: string,
+    operation: (
+      state: ImageQualityState,
+    ) => Promise<Partial<ImageQualityState>> | Partial<ImageQualityState>,
+    summarize: (result: Partial<ImageQualityState>) => Record<string, unknown>,
+    metadata: Record<string, unknown> = {},
+  ) {
+    return (state: ImageQualityState) =>
+      pipelineLog.trace(
+        { runId: state.runId, userId: state.userId },
+        step,
+        () => operation(state),
+        summarize,
+        metadata,
+      );
+  }
+
   const workflow = new StateGraph(ImageQualityAnnotation)
-    .addNode('resolveImage', resolveImage)
-    .addNode('assess', assess)
-    .addNode('label', label)
-    .addNode('flagForReview', flagForReview)
-    .addNode('dispatch', dispatch)
+    .addNode(
+      'resolveImage',
+      logged('resolve_image', resolveImage, (s) => ({
+        mimeType: s.mimeType,
+        byteSize: s.buffer?.byteLength,
+      })),
+    )
+    .addNode(
+      'assess',
+      logged('assess_quality', assess, (s) => ({ assessment: s.assessment }), {
+        model: imageQualityService.modelName,
+      }),
+    )
+    .addNode(
+      'label',
+      logged('label', label, (s) => ({ ...s.result })),
+    )
+    .addNode(
+      'flagForReview',
+      logged('flag_for_review', flagForReview, (s) => ({ ...s.result })),
+    )
+    .addNode(
+      'dispatch',
+      logged('route', dispatch, (s) => ({ destination: s.destination })),
+    )
+    .addNode(
+      'preparePrompt',
+      logged(
+        'prepare_prompt',
+        preparePrompt,
+        (s) => ({ enhancementPrompt: s.enhancementPrompt }),
+        {
+          model: imagePrompter.modelName,
+          promptVersion: imagePrompter.promptVersion,
+        },
+      ),
+    )
     .addEdge(START, 'resolveImage')
     .addEdge('resolveImage', 'assess')
     .addConditionalEdges('assess', routeByConfidence, [
@@ -162,7 +232,12 @@ export function buildImageQualityGraph(
     ])
     .addEdge('label', 'dispatch')
     .addEdge('flagForReview', 'dispatch')
-    .addEdge('dispatch', END);
+    .addConditionalEdges(
+      'dispatch',
+      (state) => (state.destination === 'enhance' ? 'preparePrompt' : END),
+      ['preparePrompt', END],
+    )
+    .addEdge('preparePrompt', END);
 
   return workflow.compile();
 }
