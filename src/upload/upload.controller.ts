@@ -14,9 +14,7 @@ import {
   MAX_IMAGE_BYTES,
   SUPPORTED_IMAGE_TYPES,
 } from '../image-quality/image-quality.constants';
-import { UploadService } from './upload.service';
-import { ImageQualityAssessment } from '../image-quality/image-quality.service';
-import { RouteDestination } from '../routing/image-router.service';
+import { UploadService, StoredImageResult } from './upload.service';
 
 @Auth()
 @Controller('upload')
@@ -38,12 +36,7 @@ export class UploadController {
     )
     file: Express.Multer.File,
     @CurrentUser('sub') userId: string,
-  ): Promise<{
-    uuid: string;
-    cdnUrl: string;
-    assessment: ImageQualityAssessment;
-    destination: RouteDestination;
-  }> {
+  ): Promise<StoredImageResult> {
     return this.uploadService.storeImage(file, userId);
   }
 }

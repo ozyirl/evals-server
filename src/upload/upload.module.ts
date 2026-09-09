@@ -1,13 +1,12 @@
 import { Module } from '@nestjs/common';
 import { UploadController } from './upload.controller';
 import { UploadService } from './upload.service';
-import { ImageQualityModule } from '../image-quality/image-quality.module';
+import { AgentModule } from '../agent/agent.module';
 import { AuthModule } from '../auth/auth.module';
 import { AssessmentsModule } from '../assessments/assessments.module';
-import { RoutingModule } from '../routing/routing.module';
 
 @Module({
-  imports: [AssessmentsModule, AuthModule, ImageQualityModule, RoutingModule],
+  imports: [AssessmentsModule, AuthModule, AgentModule],
   controllers: [UploadController],
   providers: [UploadService],
 })
