@@ -17,15 +17,17 @@ export class AssessmentLogService {
    * Persists one assessment attempt. Deliberately swallows its own failures —
    * an unreachable database should not turn a finished assessment into a 500.
    */
-  async record(entry: NewImageAssessment): Promise<void> {
+  async record(entry: NewImageAssessment): Promise<boolean> {
     try {
       await this.db.insert(imageAssessments).values(entry);
+      return true;
     } catch (error) {
       this.logger.error(
         `Could not persist assessment for user ${entry.userId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return false;
     }
   }
 

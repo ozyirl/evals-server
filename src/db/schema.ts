@@ -9,6 +9,7 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { EnhancementPrompt } from '../image-prompter/image-prompter.schema';
 
 /**
  * Structural copy of the assessment scores. Kept local so drizzle-kit can load
@@ -50,6 +51,7 @@ export const imageAssessments = pgTable(
     model: text('model'),
     latencyMs: integer('latency_ms'),
     errorMessage: text('error_message'),
+    enhancementPrompt: jsonb('enhancement_prompt').$type<EnhancementPrompt>(),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -64,3 +66,34 @@ export const imageAssessments = pgTable(
 
 export type ImageAssessmentRow = typeof imageAssessments.$inferSelect;
 export type NewImageAssessment = typeof imageAssessments.$inferInsert;
+
+/** Events precede the final assessment row, so run_id is intentionally not a foreign key. */
+export const pipelineEvents = pgTable(
+  'pipeline_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: uuid('run_id').notNull(),
+    userId: text('user_id').notNull(),
+    hopId: uuid('hop_id').notNull(),
+    step: text('step').notNull(),
+    status: text('status')
+      .$type<'started' | 'completed' | 'failed'>()
+      .notNull(),
+    latencyMs: integer('latency_ms'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index('pipeline_events_user_run_created_idx').on(
+      table.userId,
+      table.runId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export type PipelineEventRow = typeof pipelineEvents.$inferSelect;
+export type NewPipelineEvent = typeof pipelineEvents.$inferInsert;
