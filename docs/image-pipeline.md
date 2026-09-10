@@ -71,6 +71,54 @@ in events if prompting fails. Logging is best-effort: database outages emit Nest
 but preserve the operation's result or original error. Event persistence is not guaranteed
 during a database outage.
 
+## Enhancement QA and iteration metrics
+
+`ImageQaModule` exports `ImageQaService.evaluate(input)`. It is registered in the
+agent module, ready for a future enhancer node. The graph still ends at
+`preparePrompt`: QA requires a real enhanced image and is not run on a prompt.
+There is no new public endpoint, automatic retry loop, or publication step.
+
+The QA input contract (`src/image-qa/image-qa.schema.ts`) is:
+
+- `runId`, `userId`: the existing pipeline context.
+- `original`: immutable source `{ buffer, mimeType }` for fidelity comparison.
+- `enhanced`: future enhancer output `{ buffer, mimeType, iteration }`; iteration
+  is a positive, one-based integer counting generated candidates.
+- `enhancementPrompt`: the structured editing plan used for this candidate.
+- `needsReview`: the upstream review hold; callers must carry it forward.
+
+Both images must be nonempty JPEG, PNG, or WebP buffers within the existing 10 MB
+limit. The Gemini judge sees the original first and candidate second, together
+with the requested edits, preservation constraints, and negative prompt.
+It returns 0–1 scores for improvement, edit adherence, preservation, and absence
+of artifacts, plus confidence, observed violations, remaining issues, and reasoning.
+
+Application policy v1 passes a candidate only when confidence is at least 0.6,
+improvement at least 0.7, edit adherence at least 0.8, preservation and artifact-free
+scores at least 0.9, visible improvement is reported, and there are no preservation
+violations. An upstream hold or QA confidence below 0.6 sets `needsReview` and
+prevents a pass. These initial thresholds require calibration against human labels.
+
+Each evaluation emits `evaluate_enhancement` started/completed/failed events with
+iteration, model, prompt version, policy thresholds, timing, and the completed
+`metadata.qa` result. Existing authenticated run-event retrieval exposes this
+history. Image bytes are excluded. Persistence retains the existing best-effort
+behavior; no migration is needed and no durable retry state is claimed.
+
+`summarizeQaIterations` accepts one run's consecutive results starting at iteration
+1 and returns `confidenceAtK`, `passedAtK`, `passedByK`, and
+`firstPassedIteration`. Confidence is the judge's certainty, not the probability
+of improvement. Passing **by** k means at least one accepted candidate among the
+first k iterations; a later failure does not erase an earlier pass. Across a fixed
+evaluation cohort, the pass-by-k rate is the fraction of runs passing by k.
+This helper does not calculate that cohort rate or the independent-sampling pass@k
+estimator. Failed provider calls have no QA score and must not count as passes.
+Retry orchestration, cohort aggregation, and human-label validation remain future work.
+
+QA uses `IMAGE_QA_MODEL`, falling back to `GEMINI_MODEL` and then the quality
+agent's default. Provider retries are disabled. Tests use fixture model responses;
+live Gemini QA quality and calibration have not been verified.
+
 ## Configuration and verification
 
 Uses `GEMINI_API_KEY`. `IMAGE_PROMPTER_MODEL` overrides the prompter model; otherwise
