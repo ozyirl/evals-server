@@ -7,6 +7,7 @@ import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { ImageAgentService } from './image-agent.service';
 import { ImagePrompterModule } from '../image-prompter/image-prompter.module';
+import { ImageQaModule } from '../image-qa/image-qa.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { ImagePrompterModule } from '../image-prompter/image-prompter.module';
     ImageQualityModule,
     RoutingModule,
     ImagePrompterModule,
+    ImageQaModule,
   ],
   controllers: [AgentController],
   providers: [AgentService, ImageAgentService],
