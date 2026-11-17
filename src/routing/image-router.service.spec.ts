@@ -30,34 +30,19 @@ describe('ImageRouterService', () => {
     router = new ImageRouterService();
   });
 
-  it('sends ENHANCE images to the enhancement handler', async () => {
-    const spy = jest.spyOn(router as any, 'sendToEnhancement');
-
+  it('sends ENHANCE images down the enhancement branch', async () => {
     await expect(router.route(routedImage(), 'ENHANCE')).resolves.toBe(
       'enhance',
     );
-    expect(spy).toHaveBeenCalledTimes(1);
   });
 
-  it('sends KEEP images to the catalogue handler', async () => {
-    const spy = jest.spyOn(router as any, 'sendToCatalogue');
-
+  it('sends KEEP images down the catalogue branch', async () => {
     await expect(router.route(routedImage(), 'KEEP')).resolves.toBe('keep');
-    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it('routes on the label even when the image needs review', async () => {
     await expect(
       router.route(routedImage({ needsReview: true }), 'ENHANCE'),
     ).resolves.toBe('enhance');
-  });
-
-  it('passes the image through to the handler untouched', async () => {
-    const spy = jest.spyOn(router as any, 'sendToEnhancement');
-    const image = routedImage({ imageUrl: 'https://example.com/a.jpg' });
-
-    await router.route(image, 'ENHANCE');
-
-    expect(spy).toHaveBeenCalledWith(image);
   });
 });

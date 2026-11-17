@@ -13,10 +13,28 @@ import {
   ImageRouterService,
   RouteDestination,
 } from '../routing/image-router.service';
+import { ImageEnhancerService } from '../image-enhancer/image-enhancer.service';
+import { ImagePostProcessService } from '../image-postprocess/image-postprocess.service';
+import { ImageQaService } from '../image-qa/image-qa.service';
+import { ImageStoreService } from '../storage/image-store.service';
+import { EnhancementSummary, RunOutcome } from './enhancement.types';
 import {
   buildImageQualityGraph,
+  DEFAULT_MAX_ATTEMPTS,
   ImageQualityLabel,
 } from './image-quality.graph';
+
+const MAX_ATTEMPTS_LIMIT = 5;
+
+/** `IMAGE_MAX_ATTEMPTS`, clamped so a typo cannot buy an unbounded loop. */
+export function resolveMaxAttempts(
+  raw = process.env.IMAGE_MAX_ATTEMPTS,
+): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed)
+    ? Math.min(MAX_ATTEMPTS_LIMIT, Math.max(1, parsed))
+    : DEFAULT_MAX_ATTEMPTS;
+}
 
 export type ImageSource =
   { imageUrl: string } | { buffer: Buffer; mimeType: string };
@@ -32,14 +50,20 @@ export type ImageAssessmentResult = ImageQualityLabel & {
   runId: string;
   enhancementPrompt: EnhancementPrompt | null;
   assessment: ImageQualityAssessment;
-  /** The downstream handler this image was dispatched to. */
+  /** The branch of the graph this image was dispatched to. */
   destination: RouteDestination;
+  /** Every candidate and verdict; null when no image was generated. */
+  enhancement: EnhancementSummary | null;
+  outcome: RunOutcome;
+  outcomeReason: string;
+  publishedImageUrl: string | null;
 };
 
 @Injectable()
 export class ImageAgentService {
   private readonly logger = new Logger(ImageAgentService.name);
   private readonly graph: ReturnType<typeof buildImageQualityGraph>;
+  readonly maxAttempts = resolveMaxAttempts();
 
   constructor(
     private readonly imageQualityService: ImageQualityService,
@@ -47,13 +71,22 @@ export class ImageAgentService {
     private readonly imageRouter: ImageRouterService,
     private readonly imagePrompter: ImagePrompterService,
     private readonly pipelineLog: PipelineLogService,
+    private readonly imageEnhancer: ImageEnhancerService,
+    private readonly imageQa: ImageQaService,
+    private readonly postProcessor: ImagePostProcessService,
+    private readonly imageStore: ImageStoreService,
   ) {
-    this.graph = buildImageQualityGraph(
-      this.imageQualityService,
-      this.imageRouter,
-      this.imagePrompter,
-      this.pipelineLog,
-    );
+    this.graph = buildImageQualityGraph({
+      imageQuality: this.imageQualityService,
+      imageRouter: this.imageRouter,
+      imagePrompter: this.imagePrompter,
+      imageEnhancer: this.imageEnhancer,
+      imageQa: this.imageQa,
+      postProcessor: this.postProcessor,
+      imageStore: this.imageStore,
+      pipelineLog: this.pipelineLog,
+      maxAttempts: this.maxAttempts,
+    });
   }
 
   async assessImage(
@@ -85,18 +118,45 @@ export class ImageAgentService {
         );
 
         try {
-          const state = await this.graph.invoke({
-            ...source,
-            imageUrl: baseEntry.imageUrl ?? undefined,
-            ...traceContext,
-            enhancementPrompt: null,
-          });
+          const state = await this.graph.invoke(
+            {
+              ...source,
+              imageUrl: baseEntry.imageUrl ?? undefined,
+              ...traceContext,
+              enhancementPrompt: null,
+              activePrompt: null,
+              attempts: [],
+              candidate: null,
+              finalImage: null,
+              finalCheck: null,
+              outcome: null,
+              outcomeReason: null,
+              publishedImageUrl: null,
+            },
+            // Each retry is three nodes; the default limit of 25 is too tight.
+            { recursionLimit: 12 + this.maxAttempts * 4 },
+          );
           const latencyMs = Date.now() - startedAt;
+          const enhancement: EnhancementSummary | null =
+            state.attempts.length > 0
+              ? {
+                  provider: this.imageEnhancer.provider,
+                  model: this.imageEnhancer.modelName,
+                  maxAttempts: this.maxAttempts,
+                  attempts: state.attempts,
+                  passedIteration:
+                    state.attempts.find((attempt) => attempt.qa?.passed)
+                      ?.iteration ?? null,
+                  finalCheck: state.finalCheck,
+                }
+              : null;
 
           this.logger.log(
             `${state.result.label} (${state.assessment.confidence} confidence${
               state.result.needsReview ? ', needs review' : ''
-            }) in ${latencyMs}ms`,
+            }) → ${state.outcome} after ${state.attempts.length} candidate${
+              state.attempts.length === 1 ? '' : 's'
+            } in ${latencyMs}ms`,
           );
 
           await this.persistAssessment({
@@ -114,6 +174,10 @@ export class ImageAgentService {
             model: this.imageQualityService.modelName,
             latencyMs,
             enhancementPrompt: state.enhancementPrompt,
+            enhancement,
+            outcome: state.outcome,
+            outcomeReason: state.outcomeReason,
+            publishedImageUrl: state.publishedImageUrl,
           });
 
           return {
@@ -122,6 +186,10 @@ export class ImageAgentService {
             ...state.result,
             assessment: state.assessment,
             destination: state.destination,
+            enhancement,
+            outcome: state.outcome,
+            outcomeReason: state.outcomeReason,
+            publishedImageUrl: state.publishedImageUrl,
           };
         } catch (error) {
           const latencyMs = Date.now() - startedAt;
@@ -147,6 +215,9 @@ export class ImageAgentService {
         destination: result.destination,
         needsReview: result.needsReview,
         promptGenerated: result.enhancementPrompt !== null,
+        outcome: result.outcome,
+        attempts: result.enhancement?.attempts.length ?? 0,
+        passedIteration: result.enhancement?.passedIteration ?? null,
       }),
     );
   }

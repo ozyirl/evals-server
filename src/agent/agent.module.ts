@@ -8,6 +8,9 @@ import { AgentService } from './agent.service';
 import { ImageAgentService } from './image-agent.service';
 import { ImagePrompterModule } from '../image-prompter/image-prompter.module';
 import { ImageQaModule } from '../image-qa/image-qa.module';
+import { ImageEnhancerModule } from '../image-enhancer/image-enhancer.module';
+import { ImagePostProcessModule } from '../image-postprocess/image-postprocess.module';
+import { StorageModule } from '../storage/storage.module';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { ImageQaModule } from '../image-qa/image-qa.module';
     RoutingModule,
     ImagePrompterModule,
     ImageQaModule,
+    ImageEnhancerModule,
+    ImagePostProcessModule,
+    StorageModule,
   ],
   controllers: [AgentController],
   providers: [AgentService, ImageAgentService],
