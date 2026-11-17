@@ -10,6 +10,10 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import type { EnhancementPrompt } from '../image-prompter/image-prompter.schema';
+import type {
+  EnhancementSummary,
+  RunOutcome,
+} from '../agent/enhancement.types';
 
 /**
  * Structural copy of the assessment scores. Kept local so drizzle-kit can load
@@ -52,6 +56,16 @@ export const imageAssessments = pgTable(
     latencyMs: integer('latency_ms'),
     errorMessage: text('error_message'),
     enhancementPrompt: jsonb('enhancement_prompt').$type<EnhancementPrompt>(),
+
+    /** Second pass: every candidate, its QA verdict and the final check. */
+    enhancement: jsonb('enhancement').$type<EnhancementSummary>(),
+    outcome: text('outcome').$type<RunOutcome>(),
+    outcomeReason: text('outcome_reason'),
+    publishedImageUrl: text('published_image_url'),
+
+    /** Ground truth for the confusion matrix, set by a person after the run. */
+    humanLabel: text('human_label').$type<'ENHANCE' | 'KEEP'>(),
+    humanLabeledAt: timestamp('human_labeled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

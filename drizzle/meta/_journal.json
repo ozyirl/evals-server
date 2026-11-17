@@ -15,6 +15,13 @@
       "when": 1788994283934,
       "tag": "0001_image_prompter_hop_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794892772078,
+      "tag": "0002_second_pass_and_human_labels",
+      "breakpoints": true
     }
   ]
 }
