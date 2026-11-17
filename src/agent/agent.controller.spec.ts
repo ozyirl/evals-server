@@ -15,6 +15,11 @@ describe('image API contract', () => {
   const runId = randomUUID();
   const imageAgent = { assessImage: jest.fn() };
   const pipelineLog = { listForRun: jest.fn() };
+  const assessmentLog = {
+    listForUser: jest.fn(),
+    listForEval: jest.fn(),
+    setHumanLabel: jest.fn(),
+  };
   const previousKey = process.env.CLERK_PEM_PUBLIC_KEY;
   const previousIssuer = process.env.CLERK_ISSUER;
 
@@ -37,7 +42,7 @@ describe('image API contract', () => {
       providers: [
         { provide: AgentService, useValue: {} },
         { provide: ImageAgentService, useValue: imageAgent },
-        { provide: AssessmentLogService, useValue: { listForUser: jest.fn() } },
+        { provide: AssessmentLogService, useValue: assessmentLog },
         { provide: PipelineLogService, useValue: pipelineLog },
       ],
     }).compile();
@@ -99,5 +104,88 @@ describe('image API contract', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(400);
     expect(pipelineLog.listForRun).not.toHaveBeenCalled();
+  });
+
+  it('accepts a client-chosen run ID so events can be polled mid-run', async () => {
+    imageAgent.assessImage.mockResolvedValue({ runId });
+    await request(app.getHttpServer())
+      .post('/agent/assess-image')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ imageUrl: 'https://example.com/food.png', runId })
+      .expect(201);
+    expect(imageAgent.assessImage).toHaveBeenCalledWith(
+      { imageUrl: 'https://example.com/food.png' },
+      { userId: 'api-test-user', runId },
+    );
+
+    await request(app.getHttpServer())
+      .post('/agent/assess-image')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ imageUrl: 'https://example.com/food.png', runId: 'nope' })
+      .expect(400);
+  });
+
+  it("records a human label against the caller's own run", async () => {
+    assessmentLog.setHumanLabel.mockResolvedValue({
+      id: runId,
+      humanLabel: 'KEEP',
+    });
+    const response = await request(app.getHttpServer())
+      .put(`/agent/assessments/${runId}/label`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ label: 'KEEP' })
+      .expect(200);
+    expect(response.body).toEqual({ id: runId, humanLabel: 'KEEP' });
+    expect(assessmentLog.setHumanLabel).toHaveBeenCalledWith(
+      'api-test-user',
+      runId,
+      'KEEP',
+    );
+  });
+
+  it('clears a label with null, rejects anything else, and 404s on a run the caller does not own', async () => {
+    assessmentLog.setHumanLabel.mockResolvedValue({ id: runId });
+    await request(app.getHttpServer())
+      .put(`/agent/assessments/${runId}/label`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ label: null })
+      .expect(200);
+    expect(assessmentLog.setHumanLabel).toHaveBeenLastCalledWith(
+      'api-test-user',
+      runId,
+      null,
+    );
+
+    for (const body of [{ label: 'MAYBE' }, {}]) {
+      await request(app.getHttpServer())
+        .put(`/agent/assessments/${runId}/label`)
+        .set('Authorization', `Bearer ${token}`)
+        .send(body)
+        .expect(400);
+    }
+
+    assessmentLog.setHumanLabel.mockResolvedValue(null);
+    await request(app.getHttpServer())
+      .put(`/agent/assessments/${runId}/label`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ label: 'KEEP' })
+      .expect(404);
+  });
+
+  it("summarises evals over the caller's runs only", async () => {
+    assessmentLog.listForEval.mockResolvedValue([
+      { status: 'completed', label: 'KEEP', humanLabel: 'KEEP' },
+    ]);
+    const response = await request(app.getHttpServer())
+      .get('/agent/evals/summary')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(assessmentLog.listForEval).toHaveBeenCalledWith('api-test-user');
+    expect(response.body.confusion).toMatchObject({
+      labelled: 1,
+      trueNegative: 1,
+      accuracy: 1,
+    });
+    await request(app.getHttpServer()).get('/agent/evals/summary').expect(401);
   });
 });

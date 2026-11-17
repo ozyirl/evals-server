@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { Database, DB } from '../db/db.module';
 import {
   ImageAssessmentRow,
@@ -38,5 +38,32 @@ export class AssessmentLogService {
       .where(eq(imageAssessments.userId, userId))
       .orderBy(desc(imageAssessments.createdAt))
       .limit(limit);
+  }
+
+  /** The cohort the eval layer aggregates over, newest first. */
+  async listForEval(
+    userId: string,
+    limit = 1000,
+  ): Promise<ImageAssessmentRow[]> {
+    return this.listForUser(userId, limit);
+  }
+
+  /** Records a person's ground-truth label; scoped to the caller's own run. */
+  async setHumanLabel(
+    userId: string,
+    runId: string,
+    label: 'ENHANCE' | 'KEEP' | null,
+  ): Promise<ImageAssessmentRow | null> {
+    const [row] = await this.db
+      .update(imageAssessments)
+      .set({ humanLabel: label, humanLabeledAt: label ? new Date() : null })
+      .where(
+        and(
+          eq(imageAssessments.userId, userId),
+          eq(imageAssessments.id, runId),
+        ),
+      )
+      .returning();
+    return row ?? null;
   }
 }

@@ -4,10 +4,12 @@ import {
   FileTypeValidator,
   Get,
   MaxFileSizeValidator,
+  NotFoundException,
   ParseFilePipe,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -26,7 +28,12 @@ import {
   SUPPORTED_IMAGE_TYPES,
 } from '../image-quality/image-quality.constants';
 import { AskAgentDto } from './dto/ask-agent.dto';
-import { AssessImageDto } from './dto/assess-image.dto';
+import {
+  AssessImageDto,
+  HumanLabelDto,
+  RunIdDto,
+} from './dto/assess-image.dto';
+import { EvalSummary, summarizeEvals } from '../evals/eval-summary';
 import { PipelineLogService } from '../assessments/pipeline-log.service';
 
 const imageFilePipe = new ParseFilePipe({
@@ -63,7 +70,7 @@ export class AgentController {
   ): Promise<ImageAssessmentResult> {
     return this.imageAgentService.assessImage(
       { imageUrl: dto.imageUrl },
-      { userId },
+      { userId, runId: dto.runId },
     );
   }
 
@@ -74,11 +81,12 @@ export class AgentController {
   )
   async assessImageFile(
     @UploadedFile(imageFilePipe) file: Express.Multer.File,
+    @Body() dto: RunIdDto,
     @CurrentUser('sub') userId: string,
   ): Promise<ImageAssessmentResult> {
     return this.imageAgentService.assessImage(
       { buffer: file.buffer, mimeType: file.mimetype },
-      { userId, fileName: file.originalname },
+      { userId, fileName: file.originalname, runId: dto.runId },
     );
   }
 
@@ -96,5 +104,27 @@ export class AgentController {
     @CurrentUser('sub') userId: string,
   ) {
     return this.pipelineLog.listForRun(userId, runId);
+  }
+
+  /** A person's ENHANCE/KEEP call on a run: ground truth for the matrix. */
+  @Put('assessments/:runId/label')
+  async label(
+    @Param('runId', new ParseUUIDPipe()) runId: string,
+    @Body() dto: HumanLabelDto,
+    @CurrentUser('sub') userId: string,
+  ): Promise<ImageAssessmentRow> {
+    const row = await this.assessmentLog.setHumanLabel(
+      userId,
+      runId,
+      dto.label,
+    );
+    if (!row) throw new NotFoundException('No such run');
+    return row;
+  }
+
+  /** pass@k and the decision confusion matrix over the caller's runs. */
+  @Get('evals/summary')
+  async evalSummary(@CurrentUser('sub') userId: string): Promise<EvalSummary> {
+    return summarizeEvals(await this.assessmentLog.listForEval(userId));
   }
 }
